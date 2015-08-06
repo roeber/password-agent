@@ -1,0 +1,7 @@
+[Unit]
+Description=Wait for blink(1) devices
+DefaultDependencies=no
+
+[Path]
+PathExistsGlob=/sys/class/leds/thingm*
+Unit=blink1.target

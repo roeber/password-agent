@@ -1,0 +1,2 @@
+[Unit]
+Description=Wait for blink(1) devices

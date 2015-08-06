@@ -1,0 +1,111 @@
+#!/bin/bash
+
+NAME=Keys
+MOUNT=/run/mount
+BY_LABEL=/dev/disk/by-label
+
+MN="${MOUNT}/${NAME}"
+LN="${BY_LABEL}/${NAME}"
+
+echo "in blink1.sh" >>/tmp/blink1.out
+ls -larth /sys/class/leds >> /tmp/blink1.out
+
+# e.g. "seteach red 100"
+seteach() {
+  for led in /sys/class/leds/thingm*:"$1":led*; do
+    [[ -f "${led}/brightness" ]] && echo "$2" > "${led}/brightness"
+  done
+}
+
+off()    { seteach red    0; seteach green    0; seteach blue    0; }
+color()  { seteach red "$1"; seteach green "$2"; seteach blue "$3"; }
+
+red()    { color 255   0   0; }
+yellow() { color 255 100   0; }
+blue()   { color   0   0 255; }
+green()  { color   0 255   0; }
+
+dismount() {
+  if df -- "${MN}" >/dev/null 2>&1; then
+    umount -- "${MN}" && rmdir -- "${MN}"
+  else
+    :
+  fi
+}
+
+# The "finish" function will first try to dismount the key device.
+# If it can't for some reason, the blink(1) will be left solid red
+# as a warning.  Otherwise, it will then flash the blink(1) with
+# green/other until the key device is removed.  The other color is
+# passed as an argument to this function.
+#
+# If the key was found and sent, we call this with green(), so the
+# blink(1) stays a solid green.  If the key wasn't found, we flash
+# green/yellow.  If this script was interrupted, we flash green/red.
+# If the key device exists but couldn't be mounted, green/blue.
+
+finish() {
+  if dismount; then
+    green;
+    while [[ -h "${LN}" ]]; do
+      sleep 1; $1
+      sleep 1; green
+    done
+
+    off; exit 0
+  else
+    red; exit 1
+  fi
+}
+
+domount() {
+  if [[ -b "${LN}" ]]; then
+    [[ -d "${MN}" ]] || mkdir -- "${MN}"
+    mount -o ro -- "${LN}" "${MN}" || finish blue
+  else
+    false
+  fi
+}    
+
+dotrap() {
+  finish red
+}
+
+trap dotrap HUP
+trap dotrap TERM
+trap dotrap INT
+
+# Begin: initialize the blink(1) and set it red.
+off
+seteach play 0
+red
+
+# Flash red/yellow until the key device is mounted
+until domount; do
+  sleep 1; yellow
+  sleep 1; red
+done
+
+# Solid blue while it's working
+blue
+
+# Simple check: look for each word in the request, and see if there's a matching file.
+# If the message has a disk name or a luks name, this can find an appropriate key.
+# Of course, any file named "password" will probably also get found a lot, but hey.
+
+words=($(tr -c '[_A-Za-z0-9-]' ' ' <<<"$1"))
+
+found=0
+
+for w in "${words[@]}"; do
+  if [[ -f "${MN}/${w}" ]]; then
+    cat "${MN}/${w}"
+    found=$((found+1))
+  fi
+done
+
+if [[ $found -gt 0 ]]; then
+  finish green
+else
+  finish yellow
+fi
